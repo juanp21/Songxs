@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SONGXS - Catalog Ingestion</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <style>
+        :root { --accent: #d4f55c; }
+        body { font-family: 'Space Mono', monospace; background: #080808; }
+        .hero-text { font-family: 'Bebas Neue', sans-serif; font-size: clamp(3rem, 10vw, 7rem); letter-spacing: 0.02em; line-height: 0.9; }
+        .btn-primary { background: var(--accent); color: #000; font-family: 'Space Mono', monospace; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; transition: all 0.15s; cursor: pointer; border: none; }
+        .btn-primary:hover:not(:disabled) { background: #c2e04a; transform: translateY(-1px); }
+        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .drop-zone { border: 1.5px dashed #333; border-radius: 12px; padding: 28px; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .drop-zone.over { border-color: var(--accent); background: #0e1200; }
+        .log-line { font-size: 11px; font-family: monospace; padding: 2px 0; }
+        .log-ok  { color: #86efac; }
+        .log-err { color: #fca5a5; }
+        .log-info{ color: #71717a; }
+        table { border-collapse: collapse; width: 100%; }
+        th { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: #555; padding: 10px 14px; text-align: left; white-space: nowrap; border-bottom: 1px solid #1a1a1a; background: #0d0d0d; }
+        td { padding: 8px 14px; border-bottom: 1px solid #111; font-size: 12px; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+    </style>
+</head>
+<body class="text-white min-h-screen">
+
+<header class="w-full border-b border-zinc-900">
+    <nav class="container mx-auto px-6 py-4 flex justify-between items-center">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;letter-spacing:0.1em;color:var(--accent)">SONGXS</div>
+        <div class="text-xs text-zinc-600 uppercase tracking-widest">Catalog Ingestion</div>
+    </nav>
+</header>
+
+<main class="container mx-auto px-6 py-12">
+    <div class="max-w-2xl">
+
+        <h1 class="hero-text mb-10">CATALOG<br><span style="color:#222">INGESTION</span></h1>
+
+        <!-- Step 1: CSV -->
+        <div class="bg-zinc-950 border border-zinc-900 rounded-2xl p-6 mb-4">
+            <div class="text-xs text-zinc-600 uppercase tracking-widest mb-3">Paso 1 — CSV de Exportify</div>
+            <div class="drop-zone" id="drop-zone" onclick="document.getElementById('csv-input').click()">
+                <input type="file" id="csv-input" accept=".csv" style="display:none">
+                <div id="drop-label" class="text-zinc-500 text-sm">Arrastra el CSV de Exportify o haz clic</div>
+            </div>
+        </div>
+
+        <!-- Step 2: Artist info -->
+        <div class="bg-zinc-950 border border-zinc-900 rounded-2xl p-6 mb-4">
+            <div class="text-xs text-zinc-600 uppercase tracking-widest mb-3">Paso 2 — Datos del artista</div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs text-zinc-500 mb-1">Nombre del artista</label>
+                    <input id="artist-name" type="text" placeholder="Ej: Sindika"
+                        class="w-full bg-black border border-zinc-800 rounded-lg p-3 text-white text-sm font-mono focus:outline-none focus:border-[#d4f55c]">
+                </div>
+                <div>
+                    <label class="block text-xs text-zinc-500 mb-1">Email del artista</label>
+                    <input id="artist-email" type="email" placeholder="artista@email.com"
+                        class="w-full bg-black border border-zinc-800 rounded-lg p-3 text-white text-sm font-mono focus:outline-none focus:border-[#d4f55c]">
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Email preview -->
+        <div class="bg-zinc-950 border border-zinc-900 rounded-2xl p-6 mb-6">
+            <div class="text-xs text-zinc-600 uppercase tracking-widest mb-3">Paso 3 — Preview del email</div>
+            <pre id="email-preview" class="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap"></pre>
+        </div>
+
+        <!-- Action -->
+        <button id="run-btn" onclick="runAll()" class="btn-primary w-full py-4 rounded-xl text-sm mb-4">
+            Crear carpeta · Subir Sheet · Enviar email
+        </button>
+
+        <!-- Status -->
+        <div id="status-box" class="hidden p-4 rounded-xl text-sm font-mono mb-4"></div>
+
+        <!-- Log -->
+        <div id="log-box" class="hidden bg-zinc-950 border border-zinc-900 rounded-xl p-4 mb-6 space-y-0.5"></div>
+
+        <!-- Table preview -->
+        <div id="table-box" class="hidden">
+            <div class="text-xs text-zinc-600 uppercase tracking-widest mb-3" id="table-label"></div>
+            <div class="overflow-x-auto border border-zinc-900 rounded-xl">
+                <table><thead><tr><th>Artist</th><th>Album</th><th>Track</th><th>ISRC</th></tr></thead>
+                <tbody id="table-body"></tbody></table>
+            </div>
+        </div>
+    </div>
+</main>
+
+<script>
+let tracks = [];
+
+function esc(s) { const d=document.createElement('div'); d.appendChild(document.createTextNode(s||'')); return d.innerHTML; }
+
+function updateEmailPreview() {
+    const name = document.getElementById('artist-name').value || '[Artist Name]';
+    document.getElementById('email-preview').textContent =
+`Hey everyone,
+
+Please find the Drive folder attached. This contains the CATALOG INGESTION SHEET, and 2 sub-folders (one for uploading your mp3 and one for uploading your lyrics).
+
+Folder: [folder link]
+Catalog Ingestion Sheet: [sheet link]
+
+Important: Please name the mp3 after the ISRC.
+
+Let me know if you have any questions.
+
+Best,
+Juan`;
+}
+updateEmailPreview();
+document.getElementById('artist-name').addEventListener('input', updateEmailPreview);
+
+function handleFile(file) {
+    if (!file || !file.name.endsWith('.csv')) { showStatus('Solo se aceptan archivos .csv', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+        const lines = e.target.result.trim().split('\n');
+        const headers = lines[0].split('","').map(h => h.replace(/^"|"$/g,'').trim());
+        tracks = lines.slice(1).map(line => {
+            const vals = line.split('","').map(v => v.replace(/^"|"$/g,'').trim());
+            const row = {};
+            headers.forEach((h,i) => { row[h] = vals[i]||''; });
+            return {
+                ARTIST:       row['Nombre(s) del artista']||row['Artist Name(s)']||'',
+                'ALBUM NAME': row['Nombre del álbum']||row['Album Name']||'',
+                'TRACK NAME': row['Nombre de la canción']||row['Track Name']||'',
+                UPC: '', ISRC: row['ISRC']||'',
+            };
+        }).filter(t => t.ARTIST||t['TRACK NAME']);
+
+        document.getElementById('drop-label').textContent = `✓ ${tracks.length} tracks cargados`;
+        document.getElementById('drop-label').style.color = 'var(--accent)';
+        document.getElementById('table-label').textContent = `${tracks.length} tracks — primeros 5`;
+        document.getElementById('table-body').innerHTML = tracks.slice(0,5).map(t =>
+            `<tr><td class="text-white font-bold">${esc(t.ARTIST)}</td><td class="text-zinc-400">${esc(t['ALBUM NAME'])}</td><td>${esc(t['TRACK NAME'])}</td><td style="font-family:monospace;font-size:11px;color:#d4f55c">${esc(t.ISRC)}</td></tr>`
+        ).join('');
+        document.getElementById('table-box').classList.remove('hidden');
+        showStatus(`${tracks.length} tracks listos`, 'success');
+    };
+    reader.readAsText(file, 'utf-8');
+}
+
+function showStatus(msg, type) {
+    const el = document.getElementById('status-box');
+    el.classList.remove('hidden');
+    el.className = `p-4 rounded-xl text-sm font-mono ${type==='error'?'bg-red-950/40 border border-red-900 text-red-300':'bg-[#0e1200] border border-[#1f2a00] text-[#d4f55c]'}`;
+    el.innerHTML = msg;
+}
+
+function addLog(msg, type='info') {
+    const box = document.getElementById('log-box');
+    box.classList.remove('hidden');
+    const div = document.createElement('div');
+    div.className = `log-line log-${type}`;
+    div.textContent = (type==='ok'?'✓ ':type==='err'?'✕ ':'⋯ ') + msg;
+    box.appendChild(div);
+}
+
+async function post(url, data) {
+    const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+    return r.json();
+}
+
+async function runAll() {
+    const artistName  = document.getElementById('artist-name').value.trim();
+    const artistEmail = document.getElementById('artist-email').value.trim();
+    if (!tracks.length)  { showStatus('⚠ Carga el CSV primero', 'error'); return; }
+    if (!artistName)     { showStatus('⚠ Ingresa el nombre del artista', 'error'); return; }
+    if (!artistEmail)    { showStatus('⚠ Ingresa el email del artista', 'error'); return; }
+
+    const btn = document.getElementById('run-btn');
+    btn.disabled = true; btn.textContent = 'PROCESANDO...';
+    document.getElementById('log-box').innerHTML = '';
+    document.getElementById('log-box').classList.add('hidden');
+    document.getElementById('status-box').classList.add('hidden');
+
+    try {
+        addLog('Creando carpetas en Drive...');
+        const folders = await post('/create-folders', { artistName });
+        if (!folders.success) throw new Error(folders.error);
+        addLog('Carpeta creada: ' + artistName, 'ok');
+
+        addLog(`Creando Google Sheet con ${tracks.length} tracks...`);
+        const sheet = await post('/create-sheet', { artistName, folderId: folders.artistFolderId, tracks });
+        if (!sheet.success) throw new Error(sheet.error);
+        addLog('Sheet creado con 21 columnas', 'ok');
+
+        addLog('Compartiendo con ' + artistEmail + '...');
+        const share = await post('/share-files', { folderId: folders.artistFolderId, sheetId: sheet.sheetId, email: artistEmail });
+        if (!share.success) throw new Error(share.error);
+        addLog('Compartido con ' + artistEmail, 'ok');
+
+        addLog('Enviando email...');
+        const email = await post('/send-email', { to: artistEmail, artistName, folderLink: folders.artistFolderLink, sheetLink: sheet.sheetLink });
+        if (!email.success) throw new Error(email.error);
+        addLog('Email enviado a ' + artistEmail, 'ok');
+
+        showStatus(
+            `✓ Todo listo — <a href="${folders.artistFolderLink}" target="_blank" style="text-decoration:underline">Abrir carpeta</a> · <a href="${sheet.sheetLink}" target="_blank" style="text-decoration:underline">Abrir Sheet</a>`,
+            'success'
+        );
+    } catch(e) {
+        addLog('Error: ' + e.message, 'err');
+        showStatus('✕ ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Crear carpeta · Subir Sheet · Enviar email';
+    }
+}
+
+document.getElementById('csv-input').addEventListener('change', e => { if(e.target.files[0]) handleFile(e.target.files[0]); });
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); handleFile(e.dataTransfer.files[0]); });
+</script>
+</body>
+</html>
